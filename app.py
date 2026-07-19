@@ -35,39 +35,69 @@ st.set_page_config(page_title="NBS Ad Tracker", page_icon="📺",
 T = config.THEME
 
 # ── CSS: white / blue theme, red confined to the logo only ─────
+# Rebuilt for readability: bigger base font, a friendlier font
+# family, more breathing room in boxes/metrics. Streamlit's defaults
+# run small and dense once a page has this many widgets on it.
 st.markdown(f"""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    html, body, [class*="css"] {{
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }}
+
+    /* Base body/markdown text - was uncomfortably small by default */
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] li {{
+        font-size: 1.05rem !important;
+        line-height: 1.6 !important;
+    }}
+
+    /* Metric cards (KPIs) - values were small relative to how much
+       they matter on this page */
+    [data-testid="stMetricValue"] {{ font-size: 2rem !important; font-weight: 700 !important; }}
+    [data-testid="stMetricLabel"] {{ font-size: 0.95rem !important; opacity: 0.85; }}
+
+    /* Selectbox / radio / multiselect labels and options */
+    .stSelectbox label, .stRadio label, .stMultiSelect label,
+    .stTextInput label {{ font-size: 1rem !important; font-weight: 600 !important; }}
+    .stRadio div[role="radiogroup"] label p {{ font-size: 1rem !important; }}
+
+    /* Dataframes/tables - default is quite small on a dense sheet */
+    [data-testid="stDataFrame"] {{ font-size: 0.95rem !important; }}
+
     .main-header {{
         background-color: {T['PRIMARY_BLUE']};
-        padding: 1rem 1.5rem; border-radius: 4px; margin-bottom: 1rem;
+        padding: 1.3rem 1.8rem; border-radius: 8px; margin-bottom: 1.2rem;
     }}
-    .main-header h1 {{ color: white; margin: 0; font-size: 1.6rem; font-weight: 700; }}
-    .main-header p  {{ color: rgba(255,255,255,0.85); margin: 0; font-size: 0.85rem; }}
+    .main-header h1 {{ color: white; margin: 0; font-size: 2rem; font-weight: 700; }}
+    .main-header p  {{ color: rgba(255,255,255,0.9); margin: 0.2rem 0 0 0; font-size: 1rem; }}
+
     .section-header {{
         background-color: {T['ACCENT_BLUE']}; color: {T['DARK_GREY']};
-        padding: 0.4rem 1rem; border-radius: 3px; font-weight: 600;
-        font-size: 0.9rem; margin: 1rem 0 0.5rem 0;
+        padding: 0.6rem 1.2rem; border-radius: 6px; font-weight: 700;
+        font-size: 1.1rem; margin: 1.3rem 0 0.7rem 0;
     }}
-    .gate-box {{
-        background: #FFF8E1; border-left: 4px solid {T['PRIMARY_BLUE']};
-        padding: 0.9rem 1.1rem; border-radius: 3px; margin: 0.5rem 0;
-        font-size: 0.95rem;
+
+    .gate-box, .ok-box, .warning-box, .not-aired-box {{
+        padding: 1rem 1.3rem; border-radius: 6px; margin: 0.6rem 0;
+        font-size: 1.05rem; line-height: 1.5;
     }}
-    .ok-box {{
-        background: #E8F5E9; border-left: 4px solid #2E7D32;
-        padding: 0.7rem 1rem; border-radius: 3px; margin: 0.3rem 0; font-size: 0.85rem;
-    }}
-    .warning-box {{
-        background: #FFF8E1; border-left: 4px solid #C9A227;
-        padding: 0.7rem 1rem; border-radius: 3px; margin: 0.3rem 0; font-size: 0.85rem;
-    }}
-    .not-aired-box {{
-        background: {T['LIGHT_GREY']}; border-left: 4px solid {T['ACCENT_BLUE']};
-        padding: 0.7rem 1rem; border-radius: 3px; margin: 0.3rem 0; font-size: 0.85rem;
-    }}
+    .gate-box    {{ background: #FFF3D6; border-left: 5px solid {T['PRIMARY_BLUE']}; }}
+    .ok-box      {{ background: #E3F6E5; border-left: 5px solid #2E7D32; }}
+    .warning-box {{ background: #FFF3D6; border-left: 5px solid #C9A227; }}
+    .not-aired-box {{ background: {T['LIGHT_GREY']}; border-left: 5px solid {T['ACCENT_BLUE']}; }}
+
     div[data-testid="stSidebar"] {{ background-color: {T['PRIMARY_BLUE']}; }}
     div[data-testid="stSidebar"] * {{ color: white !important; }}
+    div[data-testid="stSidebar"] label p {{ font-size: 1.05rem !important; }}
 </style>
+""", unsafe_allow_html=True)
+
+st.markdown(f"""
+<div class="main-header">
+    <h1>NBS Ad Tracker</h1>
+</div>
 """, unsafe_allow_html=True)
 
 st.markdown(f"""
