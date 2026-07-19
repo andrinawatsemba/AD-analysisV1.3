@@ -2,7 +2,7 @@
 Persistence layer for Streamlit Community Cloud's free tier, which
 wipes local file writes on every redeploy/reboot.
 
-Setup (one-time, done by you - never touches end users):
+Setup (one-time, done by me and never touches end users):
   1. Create a GitHub personal access token with 'repo' write scope.
   2. In Streamlit Cloud -> App settings -> Secrets, add:
 
