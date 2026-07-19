@@ -89,22 +89,18 @@ def build_kpi_table(df, not_aired_count, styles):
     total_ads  = len(df[df["AD/SQ"] == "AD"])
     total_sqs  = len(df[df["AD/SQ"] == "SQ"])
     total_secs = int(df["Seconds Aired"].sum())
-    total_mins = round(total_secs / 60, 1)
-    unique_ads = df["AD/SQ Details"].nunique()
 
     kpis = [
         (f"{total_ads:,}", "Total ADs Aired"),
         (f"{total_sqs:,}", "Total Squeeze Backs"),
-        (f"{total_mins:,}", "Total Airtime (mins)"),
-        (f"{unique_ads}", "Unique Advertisers"),
-        (f"{not_aired_count:,}", "Not Aired (excluded)"),
+        (f"{total_secs:,}", "Total Airtime (secs)"),
     ]
     data = [[
         Table([[Paragraph(v, styles["KPIValue"])], [Paragraph(l, styles["KPILabel"])]],
-              colWidths=[3.1*cm])
+              colWidths=[4.5*cm])
         for v, l in kpis
     ]]
-    t = Table(data, colWidths=[3.1*cm] * 5)
+    t = Table(data, colWidths=[4.5*cm] * 3)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), NBS_LIGHT_GREY),
         ("BOX", (0, 0), (-1, -1), 0.5, NBS_MID_GREY),
@@ -126,10 +122,10 @@ def build_pie_chart(df, ad_sq_filter=None):
     pcts = utils.largest_remainder_percentages(values)  # sums to exactly 100.0
     slice_colors = [CATEGORY_COLOR_MAP[cat] for cat in config.STANDARD_CATEGORIES]
 
-    drawing = Drawing(450, 200)
+    drawing = Drawing(480, 220)
     pie = Pie()
-    pie.x, pie.y = 20, 20
-    pie.width = pie.height = 160
+    pie.x, pie.y = 20, 25
+    pie.width = pie.height = 175
     pie.data = [int(v) for v in values]
     pie.labels = [""] * len(config.STANDARD_CATEGORIES)
     pie.sideLabels = False
@@ -145,17 +141,17 @@ def build_pie_chart(df, ad_sq_filter=None):
 
     drawing.add(pie)
 
-    legend_x, legend_y = 210, 175
+    legend_x, legend_y = 225, 195
     for i, (cat, val, pct) in enumerate(zip(config.STANDARD_CATEGORIES, values, pcts)):
-        y = legend_y - (i * 26)
-        drawing.add(Rect(legend_x, y, 14, 14, fillColor=slice_colors[i],
+        y = legend_y - (i * 30)
+        drawing.add(Rect(legend_x, y, 16, 16, fillColor=slice_colors[i],
                           strokeColor=NBS_WHITE, strokeWidth=0.5))
-        drawing.add(String(legend_x + 20, y + 3, cat, fontSize=8,
+        drawing.add(String(legend_x + 24, y + 4, cat, fontSize=10,
                             fillColor=NBS_DARK_GREY, fontName="Helvetica-Bold"))
-        drawing.add(String(legend_x + 130, y + 3, f"{pct}%", fontSize=8,
+        drawing.add(String(legend_x + 150, y + 4, f"{pct}%", fontSize=10,
                             fillColor=THEME_BLUE, fontName="Helvetica-Bold"))
-        drawing.add(String(legend_x + 165, y + 3, f"({int(val):,} secs)", fontSize=7,
-                            fillColor=colors.HexColor("#7F7F7F"), fontName="Helvetica"))
+        drawing.add(String(legend_x + 190, y + 4, f"({int(val):,} secs)", fontSize=9,
+                            fillColor=colors.HexColor("#666666"), fontName="Helvetica"))
     return drawing
 
 # ── TIME BLOCK BAR CHART (chronological, not alphabetical) ──────
@@ -186,9 +182,9 @@ def build_time_block_chart(df):
     return drawing
 
 # ── CATEGORY TABLE (used for AD-only / SQ-only / Combined) ─────
-def build_category_table(df, title, ad_sq_filter=None):
+def build_category_table(df, title, ad_sq_filter=None, colwidths=None):
     scoped = df if ad_sq_filter is None else df[df["AD/SQ"] == ad_sq_filter]
-    headers = ["Category", "Airtime (secs)", "Airtime (mins)", "% of Airtime"]
+    headers = ["Category", "Airtime (secs)", "% of Airtime"]
     rows = [headers]
 
     values = []
@@ -198,17 +194,22 @@ def build_category_table(df, title, ad_sq_filter=None):
     pcts = utils.largest_remainder_percentages(values)
 
     for cat, secs, pct in zip(config.STANDARD_CATEGORIES, values, pcts):
-        rows.append([cat, f"{secs:,}", str(round(secs / 60, 1)), f"{pct}%"])
+        rows.append([cat, f"{secs:,}", f"{pct}%"])
 
     total_secs = sum(values)
-    rows.append(["TOTAL", f"{total_secs:,}", str(round(total_secs / 60, 1)), "100.0%"])
+    rows.append(["TOTAL", f"{total_secs:,}", "100.0%"])
 
-    t = Table(rows, colWidths=[4.5*cm, 3.5*cm, 3.5*cm, 3*cm])
+    # colwidths defaults to a single full-width table (7.5+4+3.5=15cm);
+    # when placed side-by-side (2 tables in a 18cm content area) pass
+    # a narrower set that actually fits in each ~9cm slot - this is
+    # the fix for the overlapping/truncated columns you saw.
+    colwidths = colwidths or [4*cm, 3.2*cm, 2.6*cm]
+    t = Table(rows, colWidths=colwidths)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), THEME_BLUE),
         ("TEXTCOLOR", (0, 0), (-1, 0), NBS_WHITE),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("ALIGN", (0, 1), (0, -1), "LEFT"),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
@@ -217,32 +218,33 @@ def build_category_table(df, title, ad_sq_filter=None):
         ("TEXTCOLOR", (0, -1), (-1, -1), NBS_WHITE),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
         ("GRID", (0, 0), (-1, -1), 0.5, NBS_MID_GREY),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
     return t
 
 def build_summary_table(df):
-    headers = ["Day", "Total ADs", "Total SQs", "Total Entries", "Airtime (secs)", "Airtime (mins)"]
+    headers = ["Day", "Total ADs", "Total SQs", "Total Entries", "Airtime (secs)"]
     rows = [headers]
     days = [d for d in config.DAY_ORDER if d in df["Date"].values]
     g_ads = g_sqs = g_ent = g_secs = 0
+
 
     for day in days:
         d = df[df["Date"] == day]
         ads, sqs, ent = len(d[d["AD/SQ"]=="AD"]), len(d[d["AD/SQ"]=="SQ"]), len(d)
         secs = int(d["Seconds Aired"].sum())
         g_ads += ads; g_sqs += sqs; g_ent += ent; g_secs += secs
-        rows.append([day, str(ads), str(sqs), str(ent), f"{secs:,}", str(round(secs/60, 1))])
+        rows.append([day, str(ads), str(sqs), str(ent), f"{secs:,}"])
 
-    rows.append(["GRAND TOTAL", str(g_ads), str(g_sqs), str(g_ent), f"{g_secs:,}", str(round(g_secs/60, 1))])
+    rows.append(["GRAND TOTAL", str(g_ads), str(g_sqs), str(g_ent), f"{g_secs:,}"])
 
-    t = Table(rows, colWidths=[3.2*cm, 2.4*cm, 2.4*cm, 3*cm, 3*cm, 3*cm])
+    t = Table(rows, colWidths=[3.8*cm, 3*cm, 3*cm, 3.4*cm, 3.8*cm])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), THEME_BLUE),
         ("TEXTCOLOR", (0, 0), (-1, 0), NBS_WHITE),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("ALIGN", (0, 1), (0, -1), "LEFT"),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
@@ -312,15 +314,6 @@ def build_pdf(df, week_label, corrections, flags, not_aired):
     story.append(section_header("EXECUTIVE SUMMARY", styles))
     story.append(Spacer(1, 0.3*cm))
     story.append(build_kpi_table(df, not_aired_count, styles))
-    story.append(Spacer(1, 0.3*cm))
-
-    corr_count = len(corrections) if corrections is not None else 0
-    flags_count = len(flags) if flags is not None else 0
-    story.append(Paragraph(
-        f"Data Quality: {corr_count} auto-correction(s) applied, {flags_count} item(s) flagged, "
-        f"{not_aired_count} not-aired entr{'y' if not_aired_count == 1 else 'ies'} excluded from airtime. "
-        f"See Excel report for full detail. All categories confirmed assigned for this report.",
-        styles["NBSBodyText"]))
     story.append(Spacer(1, 0.4*cm))
 
     story.append(section_header("SECTION 1 — AIRTIME BY CATEGORY (COMBINED)", styles))
@@ -340,8 +333,9 @@ def build_pdf(df, week_label, corrections, flags, not_aired):
 
     story.append(section_header("SECTION 2 — CATEGORY BREAKDOWN (ADs vs SQs)", styles))
     story.append(Spacer(1, 0.3*cm))
-    col1 = build_category_table(df, "ADs Only", ad_sq_filter="AD")
-    col2 = build_category_table(df, "SQs Only", ad_sq_filter="SQ")
+    narrow_widths = [3.6*cm, 3*cm, 2.4*cm]  # sums to 9cm - actually fits the side-by-side slot
+    col1 = build_category_table(df, "ADs Only", ad_sq_filter="AD", colwidths=narrow_widths)
+    col2 = build_category_table(df, "SQs Only", ad_sq_filter="SQ", colwidths=narrow_widths)
     side_by_side = Table([[col1, col2]], colWidths=[9*cm, 9*cm])
     side_by_side.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story.append(side_by_side)
@@ -355,13 +349,6 @@ def build_pdf(df, week_label, corrections, flags, not_aired):
     story.append(section_header("SECTION 4 — AIRTIME BY TIME BLOCK", styles))
     story.append(Spacer(1, 0.3*cm))
     story.append(build_time_block_chart(df))
-    story.append(Spacer(1, 0.4*cm))
-
-    story.append(HRFlowable(width="100%", thickness=1, color=NBS_MID_GREY, spaceAfter=0.2*cm))
-    story.append(Paragraph(
-        "For detailed data, formulas, corrections, flags, and the full not-aired list — "
-        "refer to the accompanying Excel report.",
-        styles["NBSBodyText"]))
 
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
     print(f"[OK] PDF saved to: {output}")

@@ -97,12 +97,6 @@ st.markdown(f"""
 st.markdown(f"""
 <div class="main-header">
     <h1>NBS Ad Tracker</h1>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown(f"""
-<div class="main-header">
-    <h1>NBS Ad Tracker</h1>
     <p>Next Media Services — Internal Use Only</p>
 </div>
 """, unsafe_allow_html=True)
@@ -146,7 +140,6 @@ def category_breakdown(df, ad_sq_filter=None):
     count_pct   = largest_remainder_percentages(counts)
 
     for r, apct, cpct in zip(rows, airtime_pct, count_pct):
-        r["Airtime (mins)"]  = round(r["Airtime (secs)"] / 60, 1)
         r["% of Airtime"]    = f"{apct}%"
         r["% of Count"]      = f"{cpct}%"
 
@@ -392,11 +385,10 @@ elif page == "Dashboard":
 
     st.markdown('<div class="section-header">EXECUTIVE SUMMARY</div>', unsafe_allow_html=True)
     total_secs = int(df["Seconds Aired"].sum())
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     c1.metric("Total ADs", f"{len(df[df['AD/SQ']=='AD']):,}")
     c2.metric("Total SQs", f"{len(df[df['AD/SQ']=='SQ']):,}")
-    c3.metric("Total Airtime (mins)", f"{round(total_secs/60, 1):,}")
-    c4.metric("Unique Advertisers", f"{df['AD/SQ Details'].nunique()}")
+    c3.metric("Total Airtime (secs)", f"{total_secs:,}")
 
     st.markdown('<div class="section-header">CATEGORY BREAKDOWN — AIRTIME</div>', unsafe_allow_html=True)
     metric_choice = st.radio("Show breakdown by", ["Airtime", "Count"], horizontal=True, key="metric_toggle")
@@ -411,16 +403,31 @@ elif page == "Dashboard":
     with col_left:
         nonzero = breakdown[breakdown[value_col] > 0]
         if not nonzero.empty:
+            # Labels pushed OUTSIDE the pie with leader lines, instead
+            # of crammed inside thin slices where text used to overlap
+            # and become unreadable (e.g. small Trade Marketing/
+            # Franchise slices). Legend on the side backs it up too.
             fig = px.pie(nonzero, names="Category", values=value_col,
                          color="Category", color_discrete_map=config.CATEGORY_COLOURS,
                          title=f"{metric_choice} by Category — {view_choice}")
-            fig.update_traces(textposition="inside", textinfo="percent+label",
-                               marker=dict(line=dict(color="white", width=2)))
+            fig.update_traces(
+                textposition="outside", textinfo="percent",
+                textfont_size=16,
+                marker=dict(line=dict(color="white", width=2)),
+                pull=[0.02] * len(nonzero),
+            )
+            fig.update_layout(
+                height=480,
+                margin=dict(t=60, b=40, l=40, r=40),
+                legend=dict(font=dict(size=15), orientation="v", y=0.5),
+                font=dict(size=15),
+                title_font_size=17,
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No categorized data yet for this view.")
     with col_right:
-        st.dataframe(breakdown[["Category", "ADs", "SQs", "Airtime (mins)", value_col, pct_col]],
+        st.dataframe(breakdown[["Category", "ADs", "SQs", value_col, pct_col]],
                      use_container_width=True, hide_index=True)
 
     st.markdown('<div class="section-header">AIRTIME BY TIME BLOCK (HOURLY)</div>', unsafe_allow_html=True)
@@ -528,8 +535,9 @@ elif page == "Not Aired Log":
     c3.metric("SQ side", f"{len(not_aired_df[not_aired_df['AD/SQ']=='SQ']):,}")
 
     st.markdown("**By reason:**")
-    st.dataframe(not_aired_df["Reason"].value_counts().reset_index().rename(
-        columns={"index": "Reason", "Reason": "Count"}), use_container_width=True, hide_index=True)
+    reason_counts = not_aired_df["Reason"].value_counts().reset_index()
+    reason_counts.columns = ["Reason", "Count"]
+    st.dataframe(reason_counts, use_container_width=True, hide_index=True)
 
     st.markdown("**Full list:**")
     st.dataframe(not_aired_df, use_container_width=True, height=400)

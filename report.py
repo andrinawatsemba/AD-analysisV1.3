@@ -138,8 +138,7 @@ def write_weekly_summary(ws, df, week_label):
     ws.row_dimensions[row_cursor].height = 20
     row_cursor += 1
 
-    s1_headers = ["Day", "Total ADs", "Total SQs", "Total Entries",
-                  "Airtime (secs)", "Airtime (mins)", "", ""]
+    s1_headers = ["Day", "Total ADs", "Total SQs", "Total Entries", "Airtime (secs)", "", "", ""]
     for col, h in enumerate(s1_headers, start=1):
         style_header(ws.cell(row=row_cursor, column=col, value=h), bg=MID_BLUE)
     row_cursor += 1
@@ -155,21 +154,17 @@ def write_weekly_summary(ws, df, week_label):
         ws.cell(row=row, column=3, value=f"=COUNTIFS('Clean Data'!A:A,\"{day}\",'Clean Data'!H:H,\"SQ\")")
         ws.cell(row=row, column=4, value=f"=COUNTIF('Clean Data'!A:A,\"{day}\")")
         ws.cell(row=row, column=5, value=f"=SUMIF('Clean Data'!A:A,\"{day}\",'Clean Data'!F:F)")
-        ws.cell(row=row, column=6, value=f"=E{row}/60")
-        ws.cell(row=row, column=6).number_format = "0.0"
-        for col in range(2, 7):
+        for col in range(2, 6):
             style_cell(ws.cell(row=row, column=col), bg=bg)
         row_cursor += 1
 
     total_row = row_cursor
     ws.cell(row=total_row, column=1, value="GRAND TOTAL")
     style_cell(ws.cell(row=total_row, column=1), bold=True, bg=DARK_BLUE, fg=WHITE)
-    for col, letter in zip(range(2, 7), ["B", "C", "D", "E", "F"]):
+    for col, letter in zip(range(2, 6), ["B", "C", "D", "E"]):
         cell = ws.cell(row=total_row, column=col,
                         value=f"=SUM({letter}{section1_start}:{letter}{total_row - 1})")
         style_cell(cell, bold=True, bg=DARK_BLUE, fg=WHITE)
-        if col == 6:
-            cell.number_format = "0.0"
     row_cursor = total_row + 3
 
     # ── Section 2: Category breakdown - AD / SQ / Combined ──
@@ -183,7 +178,7 @@ def write_weekly_summary(ws, df, week_label):
         ws.row_dimensions[row_cursor].height = 20
         row_cursor += 1
 
-        headers = ["Category", "Airtime (secs)", "Airtime (mins)", "% of Airtime", "", "", "", ""]
+        headers = ["Category", "Airtime (secs)", "% of Airtime", "", "", "", "", ""]
         for col, h in enumerate(headers, start=1):
             style_header(ws.cell(row=row_cursor, column=col, value=h), bg=MID_BLUE)
         row_cursor += 1
@@ -197,26 +192,21 @@ def write_weekly_summary(ws, df, week_label):
             style_cell(ws.cell(row=row, column=1), bold=True, align="left", bg=bg)
             ws.cell(row=row, column=2,
                     value=f"=SUMIFS('Clean Data'!F:F,'Clean Data'!G:G,\"{cat}\"{filter_clause})")
-            ws.cell(row=row, column=3, value=f"=B{row}/60")
-            ws.cell(row=row, column=3).number_format = "0.0"
             end_row = section_start + len(config.STANDARD_CATEGORIES) - 1
-            ws.cell(row=row, column=4, value=f"=B{row}/SUM(B{section_start}:B{end_row})")
-            ws.cell(row=row, column=4).number_format = "0.0%"
-            for col in range(2, 5):
+            ws.cell(row=row, column=3, value=f"=B{row}/SUM(B{section_start}:B{end_row})")
+            ws.cell(row=row, column=3).number_format = "0.0%"
+            for col in range(2, 4):
                 style_cell(ws.cell(row=row, column=col), bg=bg)
             row_cursor += 1
 
         cat_total_row = row_cursor
         ws.cell(row=cat_total_row, column=1, value="TOTAL")
         style_cell(ws.cell(row=cat_total_row, column=1), bold=True, bg=DARK_BLUE, fg=WHITE)
-        for col, letter in zip((2, 3), ("B", "C")):
-            cell = ws.cell(row=cat_total_row, column=col,
-                            value=f"=SUM({letter}{section_start}:{letter}{cat_total_row - 1})")
-            style_cell(cell, bold=True, bg=DARK_BLUE, fg=WHITE)
-            if col == 3:
-                cell.number_format = "0.0"
-        ws.cell(row=cat_total_row, column=4, value="100.0%")
-        style_cell(ws.cell(row=cat_total_row, column=4), bold=True, bg=DARK_BLUE, fg=WHITE)
+        cell = ws.cell(row=cat_total_row, column=2,
+                        value=f"=SUM(B{section_start}:B{cat_total_row - 1})")
+        style_cell(cell, bold=True, bg=DARK_BLUE, fg=WHITE)
+        ws.cell(row=cat_total_row, column=3, value="100.0%")
+        style_cell(ws.cell(row=cat_total_row, column=3), bold=True, bg=DARK_BLUE, fg=WHITE)
         return cat_total_row + 3
 
     row_cursor = write_category_section(row_cursor, "SECTION 2A - CATEGORY BREAKDOWN (ADs ONLY)", "AD")
@@ -231,7 +221,7 @@ def write_weekly_summary(ws, df, week_label):
     ws.row_dimensions[row_cursor].height = 20
     row_cursor += 1
 
-    headers3 = ["Time Block", "Airtime (secs)", "Airtime (mins)", "", "", "", "", ""]
+    headers3 = ["Time Block", "Airtime (secs)", "", "", "", "", "", ""]
     for col, h in enumerate(headers3, start=1):
         style_header(ws.cell(row=row_cursor, column=col, value=h), bg=MID_BLUE)
     row_cursor += 1
@@ -243,10 +233,7 @@ def write_weekly_summary(ws, df, week_label):
         ws.cell(row=row, column=1, value=block)
         style_cell(ws.cell(row=row, column=1), bold=True, align="left", bg=bg)
         ws.cell(row=row, column=2, value=f"=SUMIF('Clean Data'!E:E,\"{block}\",'Clean Data'!F:F)")
-        ws.cell(row=row, column=3, value=f"=B{row}/60")
-        ws.cell(row=row, column=3).number_format = "0.0"
-        for col in (2, 3):
-            style_cell(ws.cell(row=row, column=col), bg=bg)
+        style_cell(ws.cell(row=row, column=2), bg=bg)
         row_cursor += 1
 
     auto_width(ws)
