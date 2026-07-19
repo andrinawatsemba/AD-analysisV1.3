@@ -185,7 +185,7 @@ def build_time_block_chart(df):
 def build_category_table(df, title, ad_sq_filter=None, colwidths=None):
     scoped = df if ad_sq_filter is None else df[df["AD/SQ"] == ad_sq_filter]
     headers = ["Category", "Airtime (secs)", "% of Airtime"]
-    rows = [headers]
+    rows = [[title, "", ""], headers]
 
     values = []
     for cat in config.STANDARD_CATEGORIES:
@@ -206,20 +206,32 @@ def build_category_table(df, title, ad_sq_filter=None, colwidths=None):
     colwidths = colwidths or [4*cm, 3.2*cm, 2.6*cm]
     t = Table(rows, colWidths=colwidths)
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), THEME_BLUE),
+        # Title row (e.g. "ADs Only" / "SQs Only") - darker than the
+        # header row below it so the two are visually distinct, not
+        # something you have to guess by reading column contents.
+        ("SPAN", (0, 0), (-1, 0)),
+        ("BACKGROUND", (0, 0), (-1, 0), NBS_DARK_GREY),
         ("TEXTCOLOR", (0, 0), (-1, 0), NBS_WHITE),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("ALIGN", (0, 1), (0, -1), "LEFT"),
-        ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [NBS_WHITE, NBS_LIGHT_GREY]),
+        ("FONTSIZE", (0, 0), (-1, 0), 10.5),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, 0), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
+
+        ("BACKGROUND", (0, 1), (-1, 1), THEME_BLUE),
+        ("TEXTCOLOR", (0, 1), (-1, 1), NBS_WHITE),
+        ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 1), (-1, -1), 9.5),
+        ("ALIGN", (0, 1), (-1, -1), "CENTER"),
+        ("ALIGN", (0, 2), (0, -1), "LEFT"),
+        ("FONTNAME", (0, 2), (0, -1), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS", (0, 2), (-1, -2), [NBS_WHITE, NBS_LIGHT_GREY]),
         ("BACKGROUND", (0, -1), (-1, -1), NBS_DARK_GREY),
         ("TEXTCOLOR", (0, -1), (-1, -1), NBS_WHITE),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.5, NBS_MID_GREY),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("GRID", (0, 1), (-1, -1), 0.5, NBS_MID_GREY),
+        ("TOPPADDING", (0, 1), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
     ]))
     return t
 
@@ -320,7 +332,7 @@ def build_pdf(df, week_label, corrections, flags, not_aired):
     story.append(Spacer(1, 0.3*cm))
     story.append(build_pie_chart(df))
     story.append(Spacer(1, 0.3*cm))
-    story.append(build_category_table(df, "Combined"))
+    story.append(build_category_table(df, "COMBINED (AD + SQ)"))
     story.append(Spacer(1, 0.3*cm))
 
     story.append(PageBreak())
@@ -334,8 +346,8 @@ def build_pdf(df, week_label, corrections, flags, not_aired):
     story.append(section_header("SECTION 2 — CATEGORY BREAKDOWN (ADs vs SQs)", styles))
     story.append(Spacer(1, 0.3*cm))
     narrow_widths = [3.6*cm, 3*cm, 2.4*cm]  # sums to 9cm - actually fits the side-by-side slot
-    col1 = build_category_table(df, "ADs Only", ad_sq_filter="AD", colwidths=narrow_widths)
-    col2 = build_category_table(df, "SQs Only", ad_sq_filter="SQ", colwidths=narrow_widths)
+    col1 = build_category_table(df, "ADS ONLY", ad_sq_filter="AD", colwidths=narrow_widths)
+    col2 = build_category_table(df, "SQS ONLY", ad_sq_filter="SQ", colwidths=narrow_widths)
     side_by_side = Table([[col1, col2]], colWidths=[9*cm, 9*cm])
     side_by_side.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story.append(side_by_side)
