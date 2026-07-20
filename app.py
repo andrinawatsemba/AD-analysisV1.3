@@ -13,8 +13,8 @@ import github_sync
 import utils
 from pipeline import (
     preflight_check, parse_raw_file, categorize, validate, write_warehouse,
-    clear_logs, warnings_log, corrections_log, flags_log, not_aired_log,
-    style_warehouse_workbook, CATEGORY_MAP, WAREHOUSE_PATH,
+    clear_logs, warnings_log, corrections_log, flags_log, dropped_rows_log,
+    day_detection_log, style_warehouse_workbook, CATEGORY_MAP, WAREHOUSE_PATH,
 )
 
 WAREHOUSE_FILE = WAREHOUSE_PATH / "warehouse.xlsx"
@@ -165,7 +165,7 @@ def load_warehouse_df():
 st.sidebar.markdown("### Navigation")
 page = st.sidebar.radio("Navigate", [
     "Upload & Process", "Assign Categories", "Dashboard",
-    "Data Table", "Not Aired Log", "Mapping Manager", "Download Reports"
+    "Data Table", "Dropped Rows Log", "Mapping Manager", "Download Reports"
 ], label_visibility="collapsed")
 
 st.sidebar.markdown("---")
@@ -242,8 +242,19 @@ if page == "Upload & Process":
             c1.metric("Rows Extracted", f"{len(df_parsed):,}")
             c2.metric("ADs", f"{len(df_parsed[df_parsed['AD/SQ']=='AD']):,}")
             c3.metric("Squeeze Backs", f"{len(df_parsed[df_parsed['AD/SQ']=='SQ']):,}")
-            c4.metric("Not Aired", f"{len(not_aired_log):,}",
-                      help="Blank time or explicitly marked 'not aired' - correctly excluded, see Not Aired Log page")
+            c4.metric("Dropped", f"{len(dropped_rows_log):,}",
+                      help="Blank time, marked 'not aired', or operational text - see Dropped Rows Log page")
+
+            raw_scanned = sum(d["Raw Entries Scanned"] for d in day_detection_log)
+            reconciles = raw_scanned == len(df_parsed) + len(dropped_rows_log)
+            check_class = "ok-box" if reconciles else "warning-box"
+            check_icon = "✓" if reconciles else "⚠"
+            st.markdown(
+                f'<div class="{check_class}">{check_icon} Row check: {raw_scanned:,} raw entries found = '
+                f'{len(df_parsed):,} in Clean Data + {len(dropped_rows_log):,} dropped. '
+                f'{"Nothing unaccounted for." if reconciles else "Mismatch - investigate before trusting this run."}'
+                f'</div>', unsafe_allow_html=True
+            )
 
             with st.spinner("Categorizing ads..."):
                 df_categorized, fuzzy_matches = categorize(df_parsed, CATEGORY_MAP)
@@ -259,7 +270,8 @@ if page == "Upload & Process":
                 df_validated = validate(df_categorized)
 
             with st.spinner("Writing to warehouse..."):
-                success = write_warehouse(df_validated.copy(), corrections_log, flags_log, not_aired_log)
+                success = write_warehouse(df_validated.copy(), corrections_log, flags_log,
+                                           dropped_rows_log, day_detection_log)
 
             if success:
                 sync_to_github()
@@ -343,12 +355,14 @@ elif page == "Assign Categories":
 
         _corr = pd.read_excel(WAREHOUSE_FILE, sheet_name="Corrections Log")
         _flags = pd.read_excel(WAREHOUSE_FILE, sheet_name="Flags Log")
-        _not_aired = pd.read_excel(WAREHOUSE_FILE, sheet_name="Not Aired Log")
+        _dropped = pd.read_excel(WAREHOUSE_FILE, sheet_name="Dropped Rows Log")
+        _detection = pd.read_excel(WAREHOUSE_FILE, sheet_name="Day Detection Log")
         with pd.ExcelWriter(WAREHOUSE_FILE, engine="openpyxl") as writer:
             wh_df.to_excel(writer, index=False, sheet_name="Clean Data")
             _corr.to_excel(writer, index=False, sheet_name="Corrections Log")
             _flags.to_excel(writer, index=False, sheet_name="Flags Log")
-            _not_aired.to_excel(writer, index=False, sheet_name="Not Aired Log")
+            _dropped.to_excel(writer, index=False, sheet_name="Dropped Rows Log")
+            _detection.to_excel(writer, index=False, sheet_name="Day Detection Log")
             style_warehouse_workbook(writer.book)
 
         sync_to_github()
@@ -506,14 +520,17 @@ elif page == "Data Table":
                  use_container_width=True, height=500)
 
 # ════════════════════════════════════════════════════════════════
-# PAGE 5 — NOT AIRED LOG
+# PAGE 5 — DROPPED ROWS LOG
 # ════════════════════════════════════════════════════════════════
-elif page == "Not Aired Log":
+elif page == "Dropped Rows Log":
 
-    st.markdown('<div class="section-header">NOT AIRED LOG</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">DROPPED ROWS LOG</div>', unsafe_allow_html=True)
     st.markdown(
-        "Every ad/SQ with a blank time cell or explicitly marked 'not aired' - "
-        "correctly excluded from airtime, but visible here instead of silently vanishing."
+        "Every AD/SQ that did not make it into Clean Data, and why - blank time, "
+        "marked 'not aired', or operational/schedule text that was never a real ad. "
+        "Visible here instead of silently vanishing. For the full row-count proof "
+        "that nothing else went missing, see the Validation sheet in the downloaded "
+        "Excel report."
     )
 
     if not WAREHOUSE_FILE.exists():
@@ -521,26 +538,26 @@ elif page == "Not Aired Log":
         st.stop()
 
     try:
-        not_aired_df = pd.read_excel(WAREHOUSE_FILE, sheet_name="Not Aired Log")
+        dropped_df = pd.read_excel(WAREHOUSE_FILE, sheet_name="Dropped Rows Log")
     except Exception:
-        not_aired_df = pd.DataFrame()
+        dropped_df = pd.DataFrame()
 
-    if not_aired_df.empty:
-        st.markdown('<div class="ok-box">No not-aired entries logged.</div>', unsafe_allow_html=True)
+    if dropped_df.empty:
+        st.markdown('<div class="ok-box">No dropped rows logged.</div>', unsafe_allow_html=True)
         st.stop()
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total Not-Aired", f"{len(not_aired_df):,}")
-    c2.metric("AD side", f"{len(not_aired_df[not_aired_df['AD/SQ']=='AD']):,}")
-    c3.metric("SQ side", f"{len(not_aired_df[not_aired_df['AD/SQ']=='SQ']):,}")
+    c1.metric("Total Dropped", f"{len(dropped_df):,}")
+    c2.metric("AD side", f"{len(dropped_df[dropped_df['AD/SQ']=='AD']):,}")
+    c3.metric("SQ side", f"{len(dropped_df[dropped_df['AD/SQ']=='SQ']):,}")
 
     st.markdown("**By reason:**")
-    reason_counts = not_aired_df["Reason"].value_counts().reset_index()
+    reason_counts = dropped_df["Reason"].value_counts().reset_index()
     reason_counts.columns = ["Reason", "Count"]
     st.dataframe(reason_counts, use_container_width=True, hide_index=True)
 
     st.markdown("**Full list:**")
-    st.dataframe(not_aired_df, use_container_width=True, height=400)
+    st.dataframe(dropped_df, use_container_width=True, height=400)
 
 # ════════════════════════════════════════════════════════════════
 # PAGE 6 — MAPPING MANAGER (admin/housekeeping only now)
@@ -616,26 +633,35 @@ elif page == "Download Reports":
                 unsafe_allow_html=True)
     st.markdown(f"Exporting: **{selected_week}** — {len(df_export):,} rows")
 
-    from report import write_clean_data, write_weekly_summary, write_corrections, write_flags, write_not_aired
+    from report import (write_clean_data, write_weekly_summary, write_corrections,
+                         write_flags, write_dropped_rows, write_validation_sheet)
     from pdf_report import build_pdf
 
     corrections = pd.read_excel(WAREHOUSE_FILE, sheet_name="Corrections Log")
     flags = pd.read_excel(WAREHOUSE_FILE, sheet_name="Flags Log")
-    not_aired = pd.read_excel(WAREHOUSE_FILE, sheet_name="Not Aired Log")
+    dropped_rows = pd.read_excel(WAREHOUSE_FILE, sheet_name="Dropped Rows Log")
+    day_detection = pd.read_excel(WAREHOUSE_FILE, sheet_name="Day Detection Log")
+    if "Week" in day_detection.columns:
+        day_detection = day_detection[day_detection["Week"] == selected_week]
+    if "Week" in dropped_rows.columns:
+        dropped_rows = dropped_rows[dropped_rows["Week"] == selected_week]
 
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("### Excel Report")
+        st.caption("Includes a Validation sheet for cross-checking the cleaning process.")
         if st.button("Generate Excel Report", type="primary"):
             from openpyxl import Workbook
             output = BytesIO()
             wb = Workbook()
             wb.remove(wb.active)
+            write_validation_sheet(wb.create_sheet("Validation"), df_export,
+                                    dropped_rows, day_detection, selected_week)
             write_clean_data(wb.create_sheet("Clean Data"), df_export)
             write_weekly_summary(wb.create_sheet("Weekly Summary"), df_export, selected_week)
             write_corrections(wb.create_sheet("Corrections Log"), corrections)
             write_flags(wb.create_sheet("Flags Log"), flags)
-            write_not_aired(wb.create_sheet("Not Aired Log"), not_aired)
+            write_dropped_rows(wb.create_sheet("Dropped Rows Log"), dropped_rows)
             wb.save(output)
             output.seek(0)
             safe_week = selected_week.replace(" ", "_").replace(".", "-")
@@ -644,8 +670,9 @@ elif page == "Download Reports":
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     with col2:
         st.markdown("### PDF Report")
+        st.caption("Clean, submission-ready summary - no cleaning-log detail.")
         if st.button("Generate PDF Report", type="primary"):
-            pdf_path = build_pdf(df_export, selected_week, corrections, flags, not_aired)
+            pdf_path = build_pdf(df_export, selected_week, corrections, flags, dropped_rows)
             with open(pdf_path, "rb") as f:
                 pdf_bytes = f.read()
             safe_week = selected_week.replace(" ", "_").replace(".", "-")

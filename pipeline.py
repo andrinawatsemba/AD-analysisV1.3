@@ -2,6 +2,7 @@ import pandas as pd
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
+from openpyxl.utils import get_column_letter
 
 import config
 
@@ -16,15 +17,27 @@ WAREHOUSE_PATH.mkdir(exist_ok=True)
 OUTPUT_FOLDER.mkdir(exist_ok=True)
 
 # ── LOGGING ──────────────────────────────────────────────────────
-# not_aired_log is new: blank-time and explicit "not aired" rows used
-# to vanish with zero trace (and the SQ side wasn't even counted).
-# Both are the same business state per your confirmation - assumed
-# not aired - so they're logged identically, visibly, but separately
-# from real error flags below.
-warnings_log    = []
-corrections_log = []
-flags_log       = []
-not_aired_log   = []
+# dropped_rows_log is a COMPLETE accounting of every named AD/SQ cell
+# that did NOT make it into Clean Data, whatever the reason - blank
+# time, explicit "not aired", or operational/non-ad text (shift
+# notes, program names). Every one of the three used to be either
+# invisible (operational text) or under-counted (SQ not-aired had no
+# logging at all). Now every one is logged with why, which is what
+# makes the row-count reconciliation in the Validation sheet honest:
+# raw entries found = Clean Data rows + dropped_rows_log rows,
+# exactly, with nothing unaccounted for in between.
+warnings_log      = []
+corrections_log   = []
+flags_log         = []
+dropped_rows_log  = []
+
+# New: exactly where each day/date was found in the raw file (column
+# letter + row number, the way you'd see it in Excel), plus how many
+# raw AD/SQ name cells were scanned that day - so you can manually
+# verify "Tuesday really was column M, row 1" against your own copy
+# of the file, and reconcile row counts (Clean Data + Dropped Rows =
+# Raw Entries Scanned, exactly).
+day_detection_log = []
 
 def log_warning(message):
     warnings_log.append(message)
@@ -46,19 +59,24 @@ def log_flag(row_ref, detail, issue, suggestion="Review manually"):
         "Suggestion":     suggestion
     })
 
-def log_not_aired(row_ref, detail, ad_sq, reason):
-    not_aired_log.append({
+def log_dropped_row(row_ref, detail, ad_sq, reason, day=None, full_date=None):
+    dropped_rows_log.append({
         "Row Reference": row_ref,
         "AD/SQ Details": detail,
         "AD/SQ":         ad_sq,
-        "Reason":        reason   # "No time entered" or "Marked not aired"
+        # "No time entered" / "Marked not aired" /
+        # "Excluded - operational or schedule text, not an ad"
+        "Reason":        reason,
+        "Day":           day,
+        "Full Date":     full_date,
     })
 
 def clear_logs():
     warnings_log.clear()
     corrections_log.clear()
     flags_log.clear()
-    not_aired_log.clear()
+    dropped_rows_log.clear()
+    day_detection_log.clear()
 
 # ── NON-AD PHRASE CHECK ──────────────────────────────────────────
 # Unchanged from the original - verified against your real raw file
@@ -304,6 +322,16 @@ def parse_raw_file(df_raw, days_found):
         else:
             print(f"   Date: {date_val}")
 
+        detection_entry = {
+            "Day": day,
+            "Column (as in Excel)": get_column_letter(day_col + 1),
+            "Row (as in Excel)": header_row + 1,
+            "Date Assigned": date_val or "(none)",
+            "Full Date": date_val,
+            "Raw Entries Scanned": 0,   # filled in after this day's rows are processed
+        }
+        day_detection_log.append(detection_entry)
+
         ad_name_col = day_col + 1
         ad_time_col = None
         sq_name_col = None
@@ -338,6 +366,7 @@ def parse_raw_file(df_raw, days_found):
         print(f"   SQ name col: {sq_name_col}, SQ time col: {sq_time_col}")
 
         ad_count, sq_count = 0, 0
+        raw_entries_this_day = 0
 
         for row_idx in range(header_row + 1, df_raw.shape[0]):
 
@@ -353,8 +382,13 @@ def parse_raw_file(df_raw, days_found):
             row_ref = f"Row {row_idx} ({day})"
 
             if ad_name_raw and ad_name_raw.lower() not in ["nan", "none", ""]:
+                raw_entries_this_day += 1
                 if is_non_ad_phrase(ad_name_raw):
-                    pass  # operational text, correctly ignored
+                    # Previously silent - now logged, so it counts
+                    # toward the reconciliation instead of vanishing.
+                    log_dropped_row(row_ref, ad_name_raw.upper().strip(), "AD",
+                                     "Excluded - operational or schedule text, not an ad",
+                                     day=day, full_date=date_val)
                 elif ad_minutes is not None:
                     all_rows.append({
                         "Date":           day,
@@ -374,7 +408,7 @@ def parse_raw_file(df_raw, days_found):
                     reason = ("Marked not aired"
                               if "not aired" in str(ad_time_raw).strip().lower()
                               else "No time entered")
-                    log_not_aired(row_ref, ad_name_raw.upper().strip(), "AD", reason)
+                    log_dropped_row(row_ref, ad_name_raw.upper().strip(), "AD", reason, day=day, full_date=date_val)
 
             # ── SQ side ──
             try:
@@ -387,8 +421,11 @@ def parse_raw_file(df_raw, days_found):
             sq_display, sq_minutes = parse_time(sq_time_raw)
 
             if sq_name_raw and sq_name_raw.lower() not in ["nan", "none", ""]:
+                raw_entries_this_day += 1
                 if is_non_ad_phrase(sq_name_raw):
-                    pass
+                    log_dropped_row(row_ref, sq_name_raw.upper().strip(), "SQ",
+                                     "Excluded - operational or schedule text, not an ad",
+                                     day=day, full_date=date_val)
                 elif sq_minutes is not None:
                     all_rows.append({
                         "Date":           day,
@@ -408,9 +445,11 @@ def parse_raw_file(df_raw, days_found):
                     reason = ("Marked not aired"
                               if "not aired" in str(sq_time_raw).strip().lower()
                               else "No time entered")
-                    log_not_aired(row_ref, sq_name_raw.upper().strip(), "SQ", reason)
+                    log_dropped_row(row_ref, sq_name_raw.upper().strip(), "SQ", reason, day=day, full_date=date_val)
 
-        print(f"   ADs extracted: {ad_count}  |  SQs extracted: {sq_count}")
+        detection_entry["Raw Entries Scanned"] = raw_entries_this_day
+        print(f"   ADs extracted: {ad_count}  |  SQs extracted: {sq_count}  |  "
+              f"Raw entries scanned: {raw_entries_this_day}")
 
     if not all_rows:
         print("\n[ERROR] No rows extracted.")
@@ -431,7 +470,7 @@ def parse_raw_file(df_raw, days_found):
     print("PARSER COMPLETE")
     print(f"   Total rows extracted: {len(df)}")
     print(f"   ADs: {len(df[df['AD/SQ'] == 'AD'])}  |  SQs: {len(df[df['AD/SQ'] == 'SQ'])}")
-    print(f"   Not-aired entries logged: {len(not_aired_log)}")
+    print(f"   Dropped rows logged: {len(dropped_rows_log)}")
     print("="*50)
 
     return df
@@ -602,7 +641,7 @@ def style_warehouse_workbook(wb):
                 ws.column_dimensions[col_letter].width = min(max_len + 4, 40)
 
 # ── WAREHOUSE WRITER ─────────────────────────────────────────────
-def write_warehouse(df, corrections, flags, not_aired):
+def write_warehouse(df, corrections, flags, dropped_rows, day_detection):
     print("\n" + "="*50)
     print("WAREHOUSE WRITER")
     print("="*50)
@@ -631,18 +670,45 @@ def write_warehouse(df, corrections, flags, not_aired):
     ]
     df = df[[c for c in col_order if c in df.columns]]
 
+    # Day detection also gets a Week label, so it merges/replaces the
+    # same way Clean Data does when a specific day is re-uploaded.
+    detection_df = pd.DataFrame(day_detection) if day_detection else pd.DataFrame(
+        columns=["Day", "Column (as in Excel)", "Row (as in Excel)",
+                 "Date Assigned", "Full Date", "Raw Entries Scanned"])
+    if not detection_df.empty:
+        detection_df["Week"] = detection_df["Full Date"].apply(
+            lambda d: calendar_week_label(d) if d else "Unknown"
+        )
+
+    # Same for dropped rows - without a Week/Day, a per-week export
+    # couldn't scope the reconciliation to just that week, and
+    # re-uploading a day would duplicate its dropped-row entries
+    # instead of replacing them.
+    dropped_df = pd.DataFrame(dropped_rows) if dropped_rows else pd.DataFrame(
+        columns=["Row Reference", "AD/SQ Details", "AD/SQ", "Reason", "Day", "Full Date"])
+    if not dropped_df.empty:
+        dropped_df["Week"] = dropped_df["Full Date"].apply(
+            lambda d: calendar_week_label(d) if d else "Unknown"
+        )
+
     weeks_touched = df["Week"].unique()
 
     if warehouse_file.exists():
         print("   Existing warehouse found - merging...")
-        existing_data        = pd.read_excel(warehouse_file, sheet_name="Clean Data")
-        existing_corrections  = pd.read_excel(warehouse_file, sheet_name="Corrections Log")
-        existing_flags        = pd.read_excel(warehouse_file, sheet_name="Flags Log")
+        existing_data       = pd.read_excel(warehouse_file, sheet_name="Clean Data")
+        existing_corrections = pd.read_excel(warehouse_file, sheet_name="Corrections Log")
+        existing_flags       = pd.read_excel(warehouse_file, sheet_name="Flags Log")
         try:
-            existing_not_aired = pd.read_excel(warehouse_file, sheet_name="Not Aired Log")
+            existing_dropped = pd.read_excel(warehouse_file, sheet_name="Dropped Rows Log")
         except Exception:
-            existing_not_aired = pd.DataFrame(
-                columns=["Row Reference", "AD/SQ Details", "AD/SQ", "Reason"])
+            existing_dropped = pd.DataFrame(
+                columns=["Row Reference", "AD/SQ Details", "AD/SQ", "Reason", "Day", "Full Date", "Week"])
+        try:
+            existing_detection = pd.read_excel(warehouse_file, sheet_name="Day Detection Log")
+        except Exception:
+            existing_detection = pd.DataFrame(
+                columns=["Day", "Column (as in Excel)", "Row (as in Excel)",
+                         "Date Assigned", "Full Date", "Raw Entries Scanned", "Week"])
 
         # Replace matching (Week, Date) pairs - this preserves other
         # days already in the same week when a single day is
@@ -657,6 +723,20 @@ def write_warehouse(df, corrections, flags, not_aired):
                 print(f"   [INFO] Replacing {replaced} existing row(s) for the day(s) being re-uploaded")
             existing_data = existing_data[~mask]
 
+        if not existing_detection.empty and not detection_df.empty:
+            det_mask = existing_detection.apply(
+                lambda r: (r["Week"], r["Day"]) in set(zip(detection_df["Week"], detection_df["Day"])),
+                axis=1
+            )
+            existing_detection = existing_detection[~det_mask]
+
+        if not existing_dropped.empty and not dropped_df.empty and "Week" in existing_dropped.columns:
+            drop_mask = existing_dropped.apply(
+                lambda r: (r["Week"], r["Day"]) in set(zip(dropped_df["Week"], dropped_df["Day"])),
+                axis=1
+            )
+            existing_dropped = existing_dropped[~drop_mask]
+
         combined_data = pd.concat([existing_data, df], ignore_index=True)
         combined_corrections = pd.concat(
             [existing_corrections, pd.DataFrame(corrections)], ignore_index=True
@@ -664,9 +744,10 @@ def write_warehouse(df, corrections, flags, not_aired):
         combined_flags = pd.concat(
             [existing_flags, pd.DataFrame(flags)], ignore_index=True
         ) if flags else existing_flags
-        combined_not_aired = pd.concat(
-            [existing_not_aired, pd.DataFrame(not_aired)], ignore_index=True
-        ) if not_aired else existing_not_aired
+        combined_dropped = pd.concat(
+            [existing_dropped, dropped_df], ignore_index=True
+        ) if dropped_rows else existing_dropped
+        combined_detection = pd.concat([existing_detection, detection_df], ignore_index=True)
     else:
         print("   No existing warehouse - creating new...")
         combined_data = df
@@ -674,28 +755,28 @@ def write_warehouse(df, corrections, flags, not_aired):
             columns=["Row Reference", "Original Value", "Corrected To", "Reason"])
         combined_flags = pd.DataFrame(flags) if flags else pd.DataFrame(
             columns=["Row Reference", "AD/SQ Details", "Issue", "Suggestion"])
-        combined_not_aired = pd.DataFrame(not_aired) if not_aired else pd.DataFrame(
-            columns=["Row Reference", "AD/SQ Details", "AD/SQ", "Reason"])
+        combined_dropped = dropped_df
+        combined_detection = detection_df
 
-    from openpyxl.styles import PatternFill, Font, Alignment
     from openpyxl.worksheet.datavalidation import DataValidation
 
     with pd.ExcelWriter(warehouse_file, engine="openpyxl") as writer:
         combined_data.to_excel(writer, index=False, sheet_name="Clean Data")
         combined_corrections.to_excel(writer, index=False, sheet_name="Corrections Log")
         combined_flags.to_excel(writer, index=False, sheet_name="Flags Log")
-        combined_not_aired.to_excel(writer, index=False, sheet_name="Not Aired Log")
+        combined_dropped.to_excel(writer, index=False, sheet_name="Dropped Rows Log")
+        combined_detection.to_excel(writer, index=False, sheet_name="Day Detection Log")
 
         weeks_in_warehouse = combined_data["Week"].unique() if "Week" in combined_data.columns else []
         summary_data = {
             "Metric": ["Total Rows in Warehouse", "Total Weeks Stored", "Total ADs",
                        "Total SQs", "Total Corrections", "Total Flags",
-                       "Total Not-Aired Entries", "Last Updated"],
+                       "Total Dropped Rows", "Last Updated"],
             "Value": [len(combined_data), len(weeks_in_warehouse),
                       len(combined_data[combined_data["AD/SQ"] == "AD"]),
                       len(combined_data[combined_data["AD/SQ"] == "SQ"]),
                       len(combined_corrections), len(combined_flags),
-                      len(combined_not_aired),
+                      len(combined_dropped),
                       datetime.now().strftime("%d.%m.%Y %H:%M")]
         }
         pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name="Summary")
@@ -714,7 +795,7 @@ def write_warehouse(df, corrections, flags, not_aired):
 
     print(f"   Week(s) touched: {list(weeks_touched)}")
     print(f"   Rows added: {len(df)}  |  Total in warehouse: {len(combined_data)}")
-    print(f"   Not-aired entries logged this run: {len(not_aired)}")
+    print(f"   Dropped rows logged this run: {len(dropped_rows)}")
     print(f"   Saved to: {warehouse_file}")
     print("="*50)
 
@@ -748,9 +829,10 @@ if __name__ == "__main__":
         print(df_validated["Aired Category"].value_counts().to_string())
         print(f"\nCorrections log: {len(corrections_log)} entries")
         print(f"Flags log: {len(flags_log)} entries")
-        print(f"Not-aired log: {len(not_aired_log)} entries")
+        print(f"Dropped rows log: {len(dropped_rows_log)} entries")
 
-        success = write_warehouse(df_validated.copy(), corrections_log, flags_log, not_aired_log)
+        success = write_warehouse(df_validated.copy(), corrections_log, flags_log,
+                                   dropped_rows_log, day_detection_log)
 
         if success:
             print("\n[OK] Pipeline complete. Warehouse updated successfully.")
