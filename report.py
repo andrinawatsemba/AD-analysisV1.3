@@ -63,16 +63,21 @@ def auto_width(ws, max_width=45):
 def load_warehouse(week_label=None):
     if not WAREHOUSE_PATH.exists():
         print("[ERROR] Warehouse not found. Run pipeline.py first.")
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
     df = pd.read_excel(WAREHOUSE_PATH, sheet_name="Clean Data")
     df.columns = df.columns.str.strip()
     corrections = pd.read_excel(WAREHOUSE_PATH, sheet_name="Corrections Log")
     flags       = pd.read_excel(WAREHOUSE_PATH, sheet_name="Flags Log")
     try:
-        not_aired = pd.read_excel(WAREHOUSE_PATH, sheet_name="Not Aired Log")
+        dropped_rows = pd.read_excel(WAREHOUSE_PATH, sheet_name="Dropped Rows Log")
     except Exception:
-        not_aired = pd.DataFrame(columns=["Row Reference", "AD/SQ Details", "AD/SQ", "Reason"])
+        dropped_rows = pd.DataFrame(columns=["Row Reference", "AD/SQ Details", "AD/SQ", "Reason"])
+    try:
+        day_detection = pd.read_excel(WAREHOUSE_PATH, sheet_name="Day Detection Log")
+    except Exception:
+        day_detection = pd.DataFrame(columns=["Day", "Column (as in Excel)", "Row (as in Excel)",
+                                               "Date Assigned", "Full Date", "Raw Entries Scanned", "Week"])
 
     if week_label and "Week" in df.columns:
         df = df[df["Week"] == week_label]
@@ -80,7 +85,10 @@ def load_warehouse(week_label=None):
         week_label = df["Week"].iloc[-1]
         df = df[df["Week"] == week_label]
 
-    return df, week_label, corrections, flags, not_aired
+    if "Week" in day_detection.columns:
+        day_detection = day_detection[day_detection["Week"] == week_label]
+
+    return df, week_label, corrections, flags, dropped_rows, day_detection
 
 # ── SHEET: CLEAN DATA ────────────────────────────────────────────
 # Columns: A=Date, B=Full Date, C=AD/SQ Details, D=Time Aired,
@@ -268,11 +276,107 @@ def write_flags(ws, flags):
                       "No flags were raised this week")
     print(f"   [OK] Flags Log sheet written - {len(flags) if flags is not None else 0} entries")
 
-def write_not_aired(ws, not_aired):
-    _write_log_sheet(ws, not_aired,
-                      ["Row Reference", "AD/SQ Details", "AD/SQ", "Reason"],
-                      "Nothing logged as not aired this week")
-    print(f"   [OK] Not Aired Log sheet written - {len(not_aired) if not_aired is not None else 0} entries")
+def write_dropped_rows(ws, dropped_rows):
+    _write_log_sheet(ws, dropped_rows,
+                      ["Row Reference", "AD/SQ Details", "AD/SQ", "Reason", "Day"],
+                      "Nothing was dropped this week - every named ad/SQ made it into Clean Data")
+    print(f"   [OK] Dropped Rows Log sheet written - {len(dropped_rows) if dropped_rows is not None else 0} entries")
+
+# ── SHEET: VALIDATION ────────────────────────────────────────────
+# What this answers, in plain terms: "did the cleaning step throw
+# away anything it shouldn't have?" Not the arithmetic (that's the
+# Weekly Summary's job, via visible native formulas) - this is
+# specifically about whether every row in the raw file is accounted
+# for. Two checks, both things you can verify against your own copy
+# of the raw file without touching any code.
+def write_validation_sheet(ws, df, dropped_rows, day_detection, week_label):
+    ws.merge_cells("A1:F1")
+    title = ws["A1"]
+    title.value = "VALIDATION - DID THE CLEANING STEP DROP ANYTHING IT SHOULDN'T HAVE?"
+    title.font = Font(bold=True, size=13, color=DARK_BLUE)
+    ws.row_dimensions[1].height = 26
+
+    ws.merge_cells("A2:F2")
+    sub = ws["A2"]
+    sub.value = (f"Week: {week_label}    |    Generated: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    sub.font = Font(italic=True, color=DARK_GREY, size=10)
+
+    row = 4
+    ws.merge_cells(f"A{row}:F{row}")
+    sec = ws[f"A{row}"]
+    sec.value = "CHECK 1 - ROW COUNT RECONCILIATION"
+    style_header(sec, bg=DARK_BLUE, size=11)
+    ws.row_dimensions[row].height = 20
+    row += 2
+
+    raw_scanned  = int(day_detection["Raw Entries Scanned"].sum()) if not day_detection.empty else 0
+    clean_rows   = len(df)
+    dropped_n    = len(dropped_rows) if dropped_rows is not None else 0
+
+    explain = [
+        "Every AD/SQ name found in the raw file lands in exactly one of two places:",
+        "Clean Data (it had a valid time and wasn't operational text), or the Dropped",
+        "Rows Log (blank time, marked 'not aired', or operational/schedule text - not",
+        "a real ad). If the two add up to the raw total below, nothing was lost.",
+    ]
+    for line in explain:
+        ws.cell(row=row, column=1, value=line).font = Font(size=10, color=DARK_GREY)
+        row += 1
+    row += 1
+
+    labels = ["Raw AD/SQ entries found in the file", "Rows in Clean Data (this week)",
+              "Rows in Dropped Rows Log (this week)", "Clean Data + Dropped Rows Log"]
+    values = [raw_scanned, clean_rows, dropped_n, clean_rows + dropped_n]
+    for label, val in zip(labels, values):
+        ws.cell(row=row, column=1, value=label)
+        style_cell(ws.cell(row=row, column=1), align="left", bold=True)
+        ws.cell(row=row, column=2, value=val)
+        style_cell(ws.cell(row=row, column=2), align="center")
+        row += 1
+
+    check_row = row
+    ws.cell(row=check_row, column=1, value="Check: does raw total = Clean Data + Dropped Rows Log?")
+    style_cell(ws.cell(row=check_row, column=1), align="left", bold=True, bg=LIGHT_BLUE)
+    match = (raw_scanned == clean_rows + dropped_n)
+    ws.cell(row=check_row, column=2,
+            value=("YES - MATCH" if match else "NO - MISMATCH, INVESTIGATE"))
+    style_cell(ws.cell(row=check_row, column=2), align="center", bold=True,
+               bg=(LIGHT_BLUE if match else "FFC7CE"))
+    row = check_row + 3
+
+    # ── Check 2: Day & Date Detection ──
+    ws.merge_cells(f"A{row}:F{row}")
+    sec2 = ws[f"A{row}"]
+    sec2.value = "CHECK 2 - DID THE TOOL FIND THE RIGHT DAY IN THE RIGHT PLACE?"
+    style_header(sec2, bg=DARK_BLUE, size=11)
+    ws.row_dimensions[row].height = 20
+    row += 1
+
+    ws.cell(row=row, column=1,
+            value="Open your original raw file and confirm each day's label really is where this says it is.")
+    ws.cell(row=row, column=1).font = Font(size=10, color=DARK_GREY, italic=True)
+    row += 2
+
+    headers = ["Day", "Found at Cell", "Date Assigned", "Raw Entries This Day"]
+    for col, h in enumerate(headers, start=1):
+        style_header(ws.cell(row=row, column=col, value=h), bg=MID_BLUE)
+    row += 1
+
+    if not day_detection.empty:
+        detection_sorted = day_detection.set_index("Day").reindex(
+            [d for d in config.DAY_ORDER if d in day_detection["Day"].values]
+        ).reset_index()
+        for i, r in detection_sorted.iterrows():
+            bg = LIGHT_BLUE if i % 2 == 0 else WHITE
+            cell_ref = f"{r['Column (as in Excel)']}{r['Row (as in Excel)']}"
+            values = [r["Day"], cell_ref, r["Date Assigned"], r["Raw Entries Scanned"]]
+            for col, val in enumerate(values, start=1):
+                cell = ws.cell(row=row, column=col, value=val)
+                style_cell(cell, bg=bg, align="left" if col <= 2 else "center")
+            row += 1
+
+    auto_width(ws)
+    print("   [OK] Validation sheet written")
 
 # ── MAIN ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -283,7 +387,7 @@ if __name__ == "__main__":
     result = load_warehouse()
     if result[0] is None:
         exit()
-    df, week_label, corrections, flags, not_aired = result
+    df, week_label, corrections, flags, dropped_rows, day_detection = result
 
     safe_week = week_label.replace(" ", "_").replace(".", "-")
     output_file = OUTPUT_FOLDER / f"NBS_AdReport_{safe_week}.xlsx"
@@ -292,19 +396,24 @@ if __name__ == "__main__":
     wb = Workbook()
     wb.remove(wb.active)
 
+    # Validation sheet first - the first thing anyone sees when they
+    # open the file, per your request to put it "at the beginning".
+    ws_validation = wb.create_sheet("Validation")
     ws_clean = wb.create_sheet("Clean Data")
     ws_summary = wb.create_sheet("Weekly Summary")
     ws_corr = wb.create_sheet("Corrections Log")
     ws_flags = wb.create_sheet("Flags Log")
-    ws_not_aired = wb.create_sheet("Not Aired Log")
+    ws_dropped = wb.create_sheet("Dropped Rows Log")
 
     print("\nWriting sheets...")
+    write_validation_sheet(ws_validation, df, dropped_rows, day_detection, week_label)
     write_clean_data(ws_clean, df)
     write_weekly_summary(ws_summary, df, week_label)
     write_corrections(ws_corr, corrections)
     write_flags(ws_flags, flags)
-    write_not_aired(ws_not_aired, not_aired)
+    write_dropped_rows(ws_dropped, dropped_rows)
 
     wb.save(output_file)
     print(f"\n[OK] Report saved to: {output_file}")
     print("="*50)
+

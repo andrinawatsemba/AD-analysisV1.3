@@ -73,19 +73,19 @@ def load_latest_week():
     corrections = pd.read_excel(WAREHOUSE_PATH, sheet_name="Corrections Log")
     flags = pd.read_excel(WAREHOUSE_PATH, sheet_name="Flags Log")
     try:
-        not_aired = pd.read_excel(WAREHOUSE_PATH, sheet_name="Not Aired Log")
+        dropped_rows = pd.read_excel(WAREHOUSE_PATH, sheet_name="Dropped Rows Log")
     except Exception:
-        not_aired = pd.DataFrame(columns=["Row Reference", "AD/SQ Details", "AD/SQ", "Reason"])
+        dropped_rows = pd.DataFrame(columns=["Row Reference", "AD/SQ Details", "AD/SQ", "Reason"])
     df.columns = df.columns.str.strip()
 
     if "Week" in df.columns:
         latest_week = df["Week"].iloc[-1]
         df = df[df["Week"] == latest_week]
-        return df, latest_week, corrections, flags, not_aired
-    return df, "Unknown Week", corrections, flags, not_aired
+        return df, latest_week, corrections, flags, dropped_rows
+    return df, "Unknown Week", corrections, flags, dropped_rows
 
 # ── KPI TABLE ────────────────────────────────────────────────────
-def build_kpi_table(df, not_aired_count, styles):
+def build_kpi_table(df, styles):
     total_ads  = len(df[df["AD/SQ"] == "AD"])
     total_sqs  = len(df[df["AD/SQ"] == "SQ"])
     total_secs = int(df["Seconds Aired"].sum())
@@ -297,7 +297,7 @@ def section_header(title, styles):
     return t
 
 # ── BUILD PDF ────────────────────────────────────────────────────
-def build_pdf(df, week_label, corrections, flags, not_aired):
+def build_pdf(df, week_label, corrections, flags, dropped_rows):
     styles = build_styles()
     safe_week = week_label.replace(" ", "_").replace(".", "-")
     output = OUTPUT_FOLDER / f"NBS_AdReport_{safe_week}.pdf"
@@ -321,11 +321,9 @@ def build_pdf(df, week_label, corrections, flags, not_aired):
         styles["NBSSubtitle"]))
     story.append(HRFlowable(width="100%", thickness=1, color=NBS_MID_GREY, spaceAfter=0.4*cm))
 
-    not_aired_count = len(not_aired) if not_aired is not None else 0
-
     story.append(section_header("EXECUTIVE SUMMARY", styles))
     story.append(Spacer(1, 0.3*cm))
-    story.append(build_kpi_table(df, not_aired_count, styles))
+    story.append(build_kpi_table(df, styles))
     story.append(Spacer(1, 0.4*cm))
 
     story.append(section_header("SECTION 1 — AIRTIME BY CATEGORY (COMBINED)", styles))
@@ -375,6 +373,6 @@ if __name__ == "__main__":
     result = load_latest_week()
     if result[0] is None:
         exit()
-    df, week_label, corrections, flags, not_aired = result
-    build_pdf(df, week_label, corrections, flags, not_aired)
+    df, week_label, corrections, flags, dropped_rows = result
+    build_pdf(df, week_label, corrections, flags, dropped_rows)
     print("="*50)
